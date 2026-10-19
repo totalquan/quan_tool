@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>量化回测工具</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #333; }
+  .header { background: #1a1a2e; color: #fff; padding: 16px 32px; }
+  .header h1 { font-size: 20px; }
+  .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+  .control-panel { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; display: flex; gap: 16px; align-items: end; flex-wrap: wrap; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .form-item { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: 13px; color: #666; }
+  input, select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 140px; }
+  button { padding: 10px 24px; background: #4361ee; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #3a56d4; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .metric-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .metric-card .label { font-size: 12px; color: #999; margin-bottom: 6px; }
+  .metric-card .value { font-size: 22px; font-weight: 600; }
+  .positive { color: #e74c3c; }
+  .negative { color: #2ecc71; }
+  .chart-box { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .chart-box h3 { font-size: 15px; margin-bottom: 12px; color: #555; }
+  #kline-chart { height: 400px; }
+  #equity-chart { height: 350px; }
+  .tip { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #856404; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>量化交易回测工具 · 入门版</h1>
+</div>
+
+<div class="container">
+  <div class="tip">
+    💡 填好股票代码和策略后点"开始回测"。默认用贵州茅台(600519)试跑。A股代码直接填数字，如 000001（平安银行）、300750（宁德时代）。
+  </div>
+
+  <div class="control-panel">
+    <div class="form-item">
+      <label>股票代码</label>
+      <input id="ts_code" value="600519">
+    </div>
+    <div class="form-item">
+      <label>策略</label>
+      <select id="strategy">
+        <option value="ma_crossover">双均线交叉（趋势跟踪）</option>
+        <option value="rsi">RSI均值回归（逆向操作）</option>
+      </select>
+    </div>
+    <div class="form-item">
+      <label>开始日期</label>
+      <input id="start_date" value="20230101">
+    </div>
+    <div class="form-item">
+      <label>结束日期</label>
+      <input id="end_date" value="20240101">
+    </div>
+    <button onclick="runBacktest()">开始回测</button>
+    <button onclick="runDemo()" style="background:#6c757d">用演示数据试试</button>
+  </div>
+
+  <div class="tip" id="status" style="display:none"></div>
+
+  <div class="metrics" id="metrics"></div>
+
+  <div class="chart-box">
+    <h3>K线图 + 买卖信号（红点=买入，绿点=卖出）</h3>
+    <div id="kline-chart"></div>
+  </div>
+
+  <div class="chart-box">
+    <h3>策略收益曲线 vs 一直持有（基准）</h3>
+    <div id="equity-chart"></div>
+  </div>
+</div>
+
+<script>
+const klineChart = echarts.init(document.getElementById('kline-chart'));
+const equityChart = echarts.init(document.getElementById('equity-chart'));
+
+function showStatus(msg, isError) {
+  const el = document.getElementById('status');
+  el.style.display = 'block';
+  el.style.background = isError ? '#f8d7da' : '#d4edda';
+  el.style.color = isError ? '#721c24' : '#155724';
+  el.style.borderColor = isError ? '#f5c6cb' : '#c3e6cb';
+  el.textContent = msg;
+}
+
+async function runBacktest() {
+  const body = {
+    ts_code: document.getElementById('ts_code').value,
+    strategy: document.getElementById('strategy').value,
+    start_date: document.getElementById('start_date').value,
+    end_date: document.getElementById('end_date').value,
+  };
+
+  showStatus('正在拉取行情数据并回测，请稍候...');
+
+  try {
+    const resp = await fetch('/api/backtest', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await resp.json();
+    if (json.code !== 0) {
+      showStatus('回测失败: ' + json.msg, true);
+      return;
+    }
+    renderResult(json.data);
+    showStatus('回测完成！');
+  } catch (e) {
+    showStatus('请求失败: ' + e.message + '（如果是网络问题，请点"用演示数据试试"）', true);
+  }
+}
+
+async function runDemo() {
+  const body = {
+    strategy: document.getElementById('strategy').value,
+    ts_code: 'DEMO',
+    start_date: '20230101',
+    end_date: '20240101',
+  };
+  showStatus('正在生成演示数据并回测...');
+  try {
+    const resp = await fetch('/api/demo', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const json = await resp.json();
+    if (json.code !== 0) {
+      showStatus('演示失败: ' + json.msg, true);
+      return;
+    }
+    renderResult(json.data);
+    showStatus('演示完成！这是用模拟数据跑的结果，点"开始回测"会拉真实A股数据。');
+  } catch (e) {
+    showStatus('请求失败: ' + e.message, true);
+  }
+}
+
+function renderResult(data) {
+  // 指标卡片
+  const m = data.metrics;
+  const cards = [
+    {label: '总收益率', value: m.total_return + '%', cls: m.total_return >= 0 ? 'positive' : 'negative'},
+    {label: '同期持有收益', value: m.benchmark_return + '%', cls: m.benchmark_return >= 0 ? 'positive' : 'negative'},
+    {label: '年化收益率', value: m.annual_return + '%', cls: m.annual_return >= 0 ? 'positive' : 'negative'},
+    {label: '最大回撤', value: m.max_drawdown + '%', cls: 'negative'},
+    {label: '夏普比率', value: m.sharpe_ratio, cls: ''},
+    {label: '交易次数', value: m.trade_count + ' 次', cls: ''},
+  ];
+  document.getElementById('metrics').innerHTML = cards.map(c =>
+    `<div class="metric-card"><div class="label">${c.label}</div><div class="value ${c.cls}">${c.value}</div></div>`
+  ).join('');
+
+  // K线图
+  const dates = data.kline.map(k => k.date);
+  const ohlc = data.kline.map(k => [k.open, k.close, k.low, k.high]);
+  // 找买卖点：signal从0变1=买入，从1变0=卖出
+  const buyPoints = [], sellPoints = [];
+  for (let i = 1; i < data.kline.length; i++) {
+    const prev = data.kline[i-1].signal, cur = data.kline[i].signal;
+    if (prev === 0 && cur === 1) buyPoints.push([i, data.kline[i].low * 0.98]);
+    if (prev === 1 && cur === 0) sellPoints.push([i, data.kline[i].high * 1.02]);
+  }
+  klineChart.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: dates },
+    yAxis: { scale: true },
+    dataZoom: [{type: 'inside'}, {type: 'slider'}],
+    series: [
+      { type: 'candlestick', data: ohlc,
+        itemStyle: { color: '#e74c3c', color0: '#2ecc71', borderColor: '#e74c3c', borderColor0: '#2ecc71' }
+      },
+      { type: 'scatter', data: buyPoints, symbolSize: 10, itemStyle: { color: '#e74c3c' }, name: '买入' },
+      { type: 'scatter', data: sellPoints, symbolSize: 10, itemStyle: { color: '#2ecc71' }, name: '卖出' },
+    ]
+  });
+
+  // 收益曲线
+  const eqDates = data.equity_curve.map(e => e.date);
+  equityChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['策略收益', '一直持有'] },
+    xAxis: { type: 'category', data: eqDates },
+    yAxis: { type: 'value', scale: true },
+    series: [
+      { name: '策略收益', type: 'line', data: data.equity_curve.map(e => e.strategy), smooth: true, lineStyle: {width: 2} },
+      { name: '一直持有', type: 'line', data: data.equity_curve.map(e => e.benchmark), smooth: true, lineStyle: {width: 1, type: 'dashed'} },
+    ]
+  });
+}
+</script>
+</body>
+</html>

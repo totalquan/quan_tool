@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  quant-backtest:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./quant.db:/app/quant.db   # 数据库文件持久化到本地
+    restart: unless-stopped

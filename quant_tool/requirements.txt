@@ -1,0 +1,7 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+akshare>=1.16.0
+pandas==2.2.3
+numpy==2.1.1
+sqlalchemy==2.0.35
+pydantic==2.9.2
